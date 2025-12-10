@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Village, CaseReport } from '../types';
 import { DISEASES } from '../constants';
-import { Loader2, Send, User, MapPin, Trash2, LocateFixed, Search } from 'lucide-react';
+import { Loader2, Send, User, MapPin, Trash2, LocateFixed, Search, Stethoscope } from 'lucide-react';
 
 interface AshaFormProps {
   villages: Village[];
@@ -19,7 +19,7 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
   const [isGeocoding, setIsGeocoding] = useState(false);
   
   // Health Details
-  const [diseaseType, setDiseaseType] = useState<string>(DISEASES[0]);
+  const [diseaseType, setDiseaseType] = useState<string>('');
   const [affectedCount, setAffectedCount] = useState<number>(1);
   const [symptoms, setSymptoms] = useState<string>('');
   
@@ -93,13 +93,16 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
     // Use matched ID or generate a new one for a new village
     const villageId = matchedVillage ? matchedVillage.id : `new-${Date.now()}`;
 
+    // Default disease to 'Unknown' if left blank so AI can predict
+    const finalDisease = diseaseType.trim() === '' ? 'Unknown' : diseaseType;
+
     const report: CaseReport = {
       id: crypto.randomUUID(),
       villageId: villageId,
       workerName,
       workerLocation,
       sanitationStatus,
-      diseaseType,
+      diseaseType: finalDisease,
       affectedCount,
       symptoms,
       notes,
@@ -113,6 +116,7 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
     setAffectedCount(1);
     setSymptoms('');
     setNotes('');
+    setDiseaseType('');
     setSanitationStatus('Good');
   };
 
@@ -251,14 +255,26 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
         {/* Section 3: Health Report */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Suspected Disease</label>
-            <select
+            <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
+              <Stethoscope className="w-3.5 h-3.5" /> Suspected Disease (Optional)
+            </label>
+            <input
+              list="diseases-list"
+              type="text"
+              placeholder="Select or Type custom disease..."
               className="w-full p-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
               value={diseaseType}
               onChange={(e) => setDiseaseType(e.target.value)}
-            >
-              {DISEASES.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
+            />
+            <datalist id="diseases-list">
+              <option value="Unknown (Let AI Predict)">Let AI Predict based on Symptoms</option>
+              {DISEASES.filter(d => d !== 'Unknown').map(d => (
+                <option key={d} value={d} />
+              ))}
+            </datalist>
+            <p className="text-[10px] text-slate-500 mt-1">
+              Leave blank or select "Unknown" if you want AI to diagnose based on symptoms.
+            </p>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Affected Count</label>
@@ -273,10 +289,10 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Key Symptoms</label>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Key Symptoms (Crucial for AI)</label>
           <input
             type="text"
-            placeholder="e.g., High fever, joint pain, rash (helps AI identify disease)"
+            placeholder="e.g., High fever, joint pain, rash, vomiting"
             className="w-full p-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
             value={symptoms}
             onChange={(e) => setSymptoms(e.target.value)}
@@ -303,11 +319,11 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
         >
           {isSubmitting ? (
             <>
-              <Loader2 className="animate-spin w-5 h-5" /> AI Analyzing Risks...
+              <Loader2 className="animate-spin w-5 h-5" /> Analyzing Risk & Actions...
             </>
           ) : (
             <>
-              <Send className="w-5 h-5" /> Submit Report & Predict Risk
+              <Send className="w-5 h-5" /> Submit Report & Get Actions
             </>
           )}
         </button>

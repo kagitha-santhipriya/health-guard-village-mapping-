@@ -42,20 +42,22 @@ export const analyzeVillageHealth = async (
       - Reported By: ${newReport.workerName}
       - Specific Location: ${newReport.workerLocation} (GPS Verified)
       - Sanitation/Garbage Condition: ${newReport.sanitationStatus} (CRITICAL FACTOR)
-      - Disease/Suspected: ${newReport.diseaseType}
+      - Reported Disease Name: ${newReport.diseaseType} (If "Unknown" or blank, predict it from symptoms)
       - Number of New People Affected: ${newReport.affectedCount}
       - Symptoms: ${newReport.symptoms}
       - Notes: ${newReport.notes}
 
       Task:
       1. Determine the new Risk Level (Green, Yellow, Red) based on infection rate, disease type, and ENVIRONMENTAL SANITATION.
-      2. PREDICT THE DISEASE: Use the 'Symptoms' provided to identify the most likely medical condition. If the reported disease is 'Unknown', this is crucial. If a disease is reported, verify if it matches the symptoms.
+      2. PREDICT/DIAGNOSE THE DISEASE: 
+         - If 'Reported Disease Name' is "Unknown" or generic, use the provided Symptoms to identify the most likely medical condition (e.g., Symptoms: "Joint pain, rash, high fever" -> Diagnosis: "Likely Dengue").
+         - If a specific disease name IS provided, verify if the symptoms match it.
+      3. RECOMMENDED ACTIONS: Provide 3-4 specific, actionable government interventions (e.g., "Dispatch mobile medical van", "Initiate mosquito fogging", "Distribute clean water/ORS").
       
       CRITICAL RULES:
       1. If Sanitation/Garbage Condition is "Worst", the Risk Level MUST be at least Yellow. If the disease is vector-borne (Dengue, Malaria, etc.) AND Sanitation is "Worst", strongly consider Red.
       2. Predict the probability (0-100) of an outbreak.
       3. Provide reasoning that explicitly mentions the sanitation condition if it is a contributing factor.
-      4. Provide 3 concise government interventions.
 
       Definitions:
       - Green: Safe, sporadic minor cases, good hygiene.
