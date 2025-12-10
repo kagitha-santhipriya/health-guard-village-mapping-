@@ -43,4 +43,35 @@ export const INITIAL_VILLAGES: Village[] = [
   {
     id: 'v4',
     name: 'Salur',
-    district
+    district: 'Vizianagaram',
+    coordinates: { lat: 18.5333, lng: 83.2167 },
+    population: 3800,
+    activeCases: 5,
+    status: HealthStatus.GREEN,
+    lastReported: new Date(Date.now() - 172800000).toISOString(),
+    dominantSymptoms: [],
+    comments: []
+  },
+  {
+    id: 'v5',
+    name: 'Gajapathinagaram',
+    district: 'Vizianagaram',
+    coordinates: { lat: 18.2833, lng: 83.3333 },
+    population: 2900,
+    activeCases: 8,
+    status: HealthStatus.YELLOW,
+    lastReported: new Date().toISOString(),
+    dominantSymptoms: ['Cough', 'Fever'],
+    comments: []
+  }
+];
+
+export const DISEASES = [
+  "Dengue",
+  "Malaria",
+  "Cholera",
+  "Typhoid",
+  "Viral Fever",
+  "COVID-19",
+  "Unknown"
+];

@@ -1,11 +1,12 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { INITIAL_VILLAGES } from './constants';
-import { Village, CaseReport, HealthStatus, AIAnalysisResult, OutbreakCluster } from './types';
+import { Village, CaseReport, HealthStatus, AIAnalysisResult, OutbreakCluster, Comment } from './types';
 import { analyzeVillageHealth, analyzeClusters } from './services/geminiService';
 import VillageMap from './components/VillageMap';
 import AshaForm from './components/AshaForm';
-import { Activity, Map as MapIcon, ShieldAlert, UserCheck, AlertTriangle, ArrowRight, Search, Database, LandPlot, Stethoscope } from 'lucide-react';
+import { Activity, Map as MapIcon, ShieldAlert, UserCheck, AlertTriangle, ArrowRight, Search, Database, LandPlot, Stethoscope, MessageSquare, Send } from 'lucide-react';
 
 // Main App Component
 const App: React.FC = () => {
@@ -16,7 +17,9 @@ const App: React.FC = () => {
     try {
       const saved = localStorage.getItem('healthguard_villages');
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Migration: Ensure comments array exists on loaded data from older versions
+        return parsed.map((v: any) => ({ ...v, comments: v.comments || [] }));
       }
     } catch (e) {
       console.error("Failed to load from local storage", e);
@@ -29,6 +32,7 @@ const App: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [latestAnalysis, setLatestAnalysis] = useState<{ villageName: string; result: AIAnalysisResult } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [commentText, setCommentText] = useState('');
 
   // Persist villages to LocalStorage whenever they change
   useEffect(() => {
@@ -62,7 +66,6 @@ const App: React.FC = () => {
       
       // Parse Coordinates from workerLocation
       // Expecting format "lat, lng"
-      // Cleanup whitespace and split
       const coords = report.workerLocation.replace(/[^\d.,-]/g, '').split(',').map(s => parseFloat(s));
       
       let lat = coords[0];
@@ -85,7 +88,8 @@ const App: React.FC = () => {
         status: HealthStatus.GREEN,
         lastReported: new Date().toISOString(),
         dominantSymptoms: [],
-        lastAshaWorker: report.workerName
+        lastAshaWorker: report.workerName,
+        comments: []
       };
     }
 
@@ -133,6 +137,24 @@ const App: React.FC = () => {
     if (match) {
       setSelectedVillageId(match.id);
     }
+  };
+
+  const handleAddComment = () => {
+    if (!selectedVillageId || !commentText.trim()) return;
+
+    const newComment: Comment = {
+      id: crypto.randomUUID(),
+      author: 'Public User',
+      text: commentText.trim(),
+      timestamp: new Date().toISOString()
+    };
+
+    setVillages(prev => prev.map(v => 
+      v.id === selectedVillageId 
+        ? { ...v, comments: [newComment, ...(v.comments || [])] }
+        : v
+    ));
+    setCommentText('');
   };
 
   // Reset Data for Demo purposes
@@ -393,6 +415,50 @@ const App: React.FC = () => {
                         </div>
                       </div>
                     )}
+
+                    {/* Public Comments Section */}
+                    <div className="mt-6 pt-4 border-t border-slate-100">
+                      <div className="flex items-center gap-2 mb-3">
+                        <MessageSquare className="w-4 h-4 text-slate-400" />
+                        <h4 className="text-sm font-bold text-slate-700">Public Comments</h4>
+                      </div>
+
+                      <div className="bg-slate-50 rounded-lg p-3 max-h-48 overflow-y-auto space-y-3 mb-3 custom-scrollbar border border-slate-100">
+                        {selectedVillage.comments && selectedVillage.comments.length > 0 ? (
+                          selectedVillage.comments.map((comment) => (
+                            <div key={comment.id} className="bg-white p-2.5 rounded shadow-sm border border-slate-100">
+                              <div className="flex justify-between items-baseline mb-1">
+                                <span className="text-xs font-bold text-slate-700">{comment.author}</span>
+                                <span className="text-[10px] text-slate-400">
+                                  {new Date(comment.timestamp).toLocaleDateString()}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-600 leading-relaxed">{comment.text}</p>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-xs text-center text-slate-400 py-2 italic">No comments yet. Be the first to share.</p>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Write a comment..."
+                          className="flex-1 text-xs p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                          value={commentText}
+                          onChange={(e) => setCommentText(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}
+                        />
+                        <button 
+                          onClick={handleAddComment}
+                          disabled={!commentText.trim()}
+                          className="bg-blue-600 text-white p-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                        >
+                          <Send className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <div className="p-8 text-center text-slate-400">
