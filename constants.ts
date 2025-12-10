@@ -13,6 +13,7 @@ export const INITIAL_VILLAGES: Village[] = [
     status: HealthStatus.GREEN,
     lastReported: new Date().toISOString(),
     dominantSymptoms: ['Mild Fever'],
+    comments: []
   },
   // Vizianagaram District
   {
@@ -25,6 +26,7 @@ export const INITIAL_VILLAGES: Village[] = [
     status: HealthStatus.YELLOW,
     lastReported: new Date(Date.now() - 86400000).toISOString(),
     dominantSymptoms: ['Fever', 'Body Pain'],
+    comments: []
   },
   {
     id: 'v3',
@@ -36,37 +38,9 @@ export const INITIAL_VILLAGES: Village[] = [
     status: HealthStatus.RED,
     lastReported: new Date().toISOString(),
     dominantSymptoms: ['High Fever', 'Vomiting', 'Rash'],
+    comments: []
   },
   {
     id: 'v4',
     name: 'Salur',
-    district: 'Vizianagaram',
-    coordinates: { lat: 18.5333, lng: 83.2167 },
-    population: 3800,
-    activeCases: 5,
-    status: HealthStatus.GREEN,
-    lastReported: new Date(Date.now() - 172800000).toISOString(),
-    dominantSymptoms: [],
-  },
-  {
-    id: 'v5',
-    name: 'Gajapathinagaram',
-    district: 'Vizianagaram',
-    coordinates: { lat: 18.2833, lng: 83.3333 },
-    population: 2900,
-    activeCases: 8,
-    status: HealthStatus.YELLOW,
-    lastReported: new Date().toISOString(),
-    dominantSymptoms: ['Cough', 'Fever'],
-  }
-];
-
-export const DISEASES = [
-  "Dengue",
-  "Malaria",
-  "Cholera",
-  "Typhoid",
-  "Viral Fever",
-  "COVID-19",
-  "Unknown"
-];
+    district

@@ -1,4 +1,5 @@
 
+
 export enum HealthStatus {
   GREEN = 'Green', // Safe
   YELLOW = 'Yellow', // Moderate Risk
@@ -8,6 +9,13 @@ export enum HealthStatus {
 export interface Coordinates {
   lat: number;
   lng: number;
+}
+
+export interface Comment {
+  id: string;
+  author: string;
+  text: string;
+  timestamp: string;
 }
 
 export interface Village {
@@ -21,6 +29,7 @@ export interface Village {
   lastReported: string; // ISO date string
   lastAshaWorker?: string; // To track who reported
   dominantSymptoms: string[];
+  comments: Comment[];
 }
 
 export interface CaseReport {
