@@ -6,7 +6,7 @@ import { Loader2, Send, User, MapPin, Trash2, LocateFixed } from 'lucide-react';
 
 interface AshaFormProps {
   villages: Village[];
-  onSubmitReport: (report: CaseReport) => Promise<void>;
+  onSubmitReport: (report: CaseReport, villageName: string) => Promise<void>;
   isSubmitting: boolean;
 }
 
@@ -49,18 +49,26 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Find village ID based on name, or use first if it's a loose match for demo
-    // In a real app, strict validation required. Here we find exact or default to first for hackathon flow.
+    // Check if village exists, or handle as new
     const matchedVillage = villages.find(v => v.name.toLowerCase() === selectedVillageName.toLowerCase());
     
-    if (!matchedVillage || !workerName || !workerLocation) {
-      alert("Please select a valid village from the list.");
+    if (!workerName || !selectedVillageName) {
+      alert("Please fill in all required fields.");
       return;
     }
 
+    // Require valid GPS coordinates for new villages to place them on map
+    if (!matchedVillage && (!workerLocation || !workerLocation.includes(','))) {
+        alert("For a new village, please click 'Detect' to capture GPS coordinates so we can place it on the map.");
+        return;
+    }
+
+    // Use matched ID or generate a new one for a new village
+    const villageId = matchedVillage ? matchedVillage.id : `new-${Date.now()}`;
+
     const report: CaseReport = {
       id: crypto.randomUUID(),
-      villageId: matchedVillage.id,
+      villageId: villageId,
       workerName,
       workerLocation,
       sanitationStatus,
@@ -71,7 +79,9 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
       timestamp: new Date().toISOString()
     };
 
-    onSubmitReport(report);
+    // Pass the typed name explicitly to handle new creations
+    onSubmitReport(report, selectedVillageName);
+    
     // Reset report specific fields only
     setAffectedCount(1);
     setSymptoms('');
@@ -116,7 +126,7 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
               <input 
                 list="village-list" 
                 className="w-full p-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
-                placeholder="Search or type village..."
+                placeholder="Type village name..."
                 value={selectedVillageName}
                 onChange={(e) => setSelectedVillageName(e.target.value)}
                 required
@@ -126,6 +136,9 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
                   <option key={v.id} value={v.name}>{v.district}</option>
                 ))}
               </datalist>
+              <p className="text-[10px] text-slate-500 mt-1">
+                * If you type a new village name, a new location marker will be created.
+              </p>
             </div>
           </div>
           
@@ -136,7 +149,7 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
                 <MapPin className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="e.g., Near Primary School, Ward 4"
+                  placeholder="Click Detect for GPS or enter Lat, Lng"
                   className="w-full pl-9 p-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
                   value={workerLocation}
                   onChange={(e) => setWorkerLocation(e.target.value)}

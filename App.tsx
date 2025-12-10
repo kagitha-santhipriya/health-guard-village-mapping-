@@ -5,7 +5,7 @@ import { Village, CaseReport, HealthStatus, AIAnalysisResult, OutbreakCluster } 
 import { analyzeVillageHealth, analyzeClusters } from './services/geminiService';
 import VillageMap from './components/VillageMap';
 import AshaForm from './components/AshaForm';
-import { Activity, Map as MapIcon, ShieldAlert, UserCheck, AlertTriangle, ArrowRight, Search, Database, Radius, LandPlot, Stethoscope } from 'lucide-react';
+import { Activity, Map as MapIcon, ShieldAlert, UserCheck, AlertTriangle, ArrowRight, Search, Database, LandPlot, Stethoscope } from 'lucide-react';
 
 // Main App Component
 const App: React.FC = () => {
@@ -49,24 +49,50 @@ const App: React.FC = () => {
   const redZones = villages.filter(v => v.status === HealthStatus.RED).length;
   const yellowZones = villages.filter(v => v.status === HealthStatus.YELLOW).length;
 
-  const handleReportSubmit = async (report: CaseReport) => {
+  const handleReportSubmit = async (report: CaseReport, villageName: string) => {
     setIsAnalyzing(true);
     
-    // Find village
-    const targetVillageIndex = villages.findIndex(v => v.id === report.villageId);
-    if (targetVillageIndex === -1) {
-      setIsAnalyzing(false);
-      return;
-    }
+    // Check if village already exists
+    let currentVillage = villages.find(v => v.id === report.villageId);
+    let isNewVillage = false;
 
-    const currentVillage = villages[targetVillageIndex];
+    // If village doesn't exist (Dynamic Creation)
+    if (!currentVillage) {
+      isNewVillage = true;
+      
+      // Parse Coordinates from workerLocation
+      // Expecting format "lat, lng" from the Detect button
+      const coords = report.workerLocation.split(',').map(s => parseFloat(s.trim()));
+      
+      let lat = coords[0];
+      let lng = coords[1];
+
+      // Fallback if parsing fails (though form validation tries to prevent this)
+      if (isNaN(lat) || isNaN(lng)) {
+        alert("Could not determine valid location coordinates. Please use the Detect button.");
+        setIsAnalyzing(false);
+        return;
+      }
+
+      currentVillage = {
+        id: report.villageId,
+        name: villageName,
+        district: "New Region", // Default for dynamically added
+        coordinates: { lat, lng },
+        population: 2000, // Estimate for new villages
+        activeCases: 0,
+        status: HealthStatus.GREEN,
+        lastReported: new Date().toISOString(),
+        dominantSymptoms: [],
+        lastAshaWorker: report.workerName
+      };
+    }
 
     // Call Gemini AI
     const analysis = await analyzeVillageHealth(currentVillage, report);
 
     // Update State
-    const updatedVillages = [...villages];
-    updatedVillages[targetVillageIndex] = {
+    const updatedVillageState: Village = {
       ...currentVillage,
       activeCases: currentVillage.activeCases + report.affectedCount,
       status: analysis.riskLevel,
@@ -75,7 +101,12 @@ const App: React.FC = () => {
       dominantSymptoms: [...new Set([...currentVillage.dominantSymptoms, ...report.symptoms.split(',').map(s => s.trim())])].slice(0, 3)
     };
 
-    setVillages(updatedVillages);
+    if (isNewVillage) {
+      setVillages(prev => [...prev, updatedVillageState]);
+    } else {
+      setVillages(prev => prev.map(v => v.id === updatedVillageState.id ? updatedVillageState : v));
+    }
+
     setLatestAnalysis({
       villageName: currentVillage.name,
       result: analysis
