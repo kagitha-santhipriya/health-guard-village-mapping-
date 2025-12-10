@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Village, CaseReport } from '../types';
 import { DISEASES } from '../constants';
-import { Loader2, Send, User, MapPin, Trash2, LocateFixed } from 'lucide-react';
+import { Loader2, Send, User, MapPin, Trash2, LocateFixed, Search } from 'lucide-react';
 
 interface AshaFormProps {
   villages: Village[];
@@ -16,6 +16,7 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
   const [selectedVillageName, setSelectedVillageName] = useState<string>('');
   const [workerLocation, setWorkerLocation] = useState('');
   const [isLocating, setIsLocating] = useState(false);
+  const [isGeocoding, setIsGeocoding] = useState(false);
   
   // Health Details
   const [diseaseType, setDiseaseType] = useState<string>(DISEASES[0]);
@@ -46,6 +47,32 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
     }
   };
 
+  const handleGeocode = async () => {
+    if (!selectedVillageName) {
+      alert("Please enter a village name first.");
+      return;
+    }
+    setIsGeocoding(true);
+    try {
+      // Search for the village in India to avoid ambiguity
+      const query = `${selectedVillageName}, India`;
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+      const data = await response.json();
+      
+      if (data && data.length > 0) {
+        const { lat, lon } = data[0];
+        setWorkerLocation(`${parseFloat(lat).toFixed(5)}, ${parseFloat(lon).toFixed(5)}`);
+      } else {
+        alert("Location not found automatically. Please enter coordinates manually or use GPS.");
+      }
+    } catch (e) {
+      console.error("Geocoding failed", e);
+      alert("Could not find location coordinates.");
+    } finally {
+      setIsGeocoding(false);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -59,7 +86,7 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
 
     // Require valid GPS coordinates for new villages to place them on map
     if (!matchedVillage && (!workerLocation || !workerLocation.includes(','))) {
-        alert("For a new village, please click 'Detect' to capture GPS coordinates so we can place it on the map.");
+        alert("For a new village, please click 'Find Coords' or 'Detect' to set the location on the map.");
         return;
     }
 
@@ -136,36 +163,49 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
                   <option key={v.id} value={v.name}>{v.district}</option>
                 ))}
               </datalist>
-              <p className="text-[10px] text-slate-500 mt-1">
-                * If you type a new village name, a new location marker will be created.
-              </p>
             </div>
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Current Specific Location (GPS)</label>
-            <div className="relative flex gap-2">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Location Coordinates (Lat, Lng)</label>
+            <div className="relative flex flex-col sm:flex-row gap-2">
               <div className="relative flex-1">
                 <MapPin className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Click Detect for GPS or enter Lat, Lng"
-                  className="w-full pl-9 p-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="e.g. 16.50, 80.64"
+                  className="w-full pl-9 p-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm"
                   value={workerLocation}
                   onChange={(e) => setWorkerLocation(e.target.value)}
                   required
                 />
               </div>
-              <button
-                type="button"
-                onClick={handleGetLocation}
-                className="bg-blue-600 text-white p-2.5 rounded-lg hover:bg-blue-700 transition flex items-center gap-1"
-                title="Use Current Location"
-              >
-                {isLocating ? <Loader2 className="w-5 h-5 animate-spin"/> : <LocateFixed className="w-5 h-5" />}
-                <span className="hidden sm:inline text-sm">Detect</span>
-              </button>
+              <div className="flex gap-2">
+                 <button
+                  type="button"
+                  onClick={handleGeocode}
+                  disabled={isGeocoding || !selectedVillageName}
+                  className="bg-indigo-600 text-white px-3 py-2.5 rounded-lg hover:bg-indigo-700 transition flex items-center gap-1 disabled:opacity-50"
+                  title="Find Coordinates from Village Name"
+                >
+                  {isGeocoding ? <Loader2 className="w-4 h-4 animate-spin"/> : <Search className="w-4 h-4" />}
+                  <span className="text-sm whitespace-nowrap">Find Coords</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleGetLocation}
+                  disabled={isLocating}
+                  className="bg-slate-700 text-white px-3 py-2.5 rounded-lg hover:bg-slate-800 transition flex items-center gap-1 disabled:opacity-50"
+                  title="Use My Current GPS Position"
+                >
+                  {isLocating ? <Loader2 className="w-4 h-4 animate-spin"/> : <LocateFixed className="w-4 h-4" />}
+                  <span className="text-sm whitespace-nowrap">My GPS</span>
+                </button>
+              </div>
             </div>
+            <p className="text-[10px] text-slate-500 mt-1">
+                * Click "Find Coords" to get location of the village entered, or "My GPS" for your current position.
+            </p>
           </div>
         </div>
 

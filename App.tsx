@@ -61,15 +61,16 @@ const App: React.FC = () => {
       isNewVillage = true;
       
       // Parse Coordinates from workerLocation
-      // Expecting format "lat, lng" from the Detect button
-      const coords = report.workerLocation.split(',').map(s => parseFloat(s.trim()));
+      // Expecting format "lat, lng"
+      // Cleanup whitespace and split
+      const coords = report.workerLocation.replace(/[^\d.,-]/g, '').split(',').map(s => parseFloat(s));
       
       let lat = coords[0];
       let lng = coords[1];
 
       // Fallback if parsing fails (though form validation tries to prevent this)
       if (isNaN(lat) || isNaN(lng)) {
-        alert("Could not determine valid location coordinates. Please use the Detect button.");
+        alert("Could not determine valid location coordinates. Please use the 'Find Coords' button.");
         setIsAnalyzing(false);
         return;
       }
