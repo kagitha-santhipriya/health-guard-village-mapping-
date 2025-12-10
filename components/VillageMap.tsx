@@ -6,9 +6,10 @@ interface VillageMapProps {
   onSelectVillage: (village: Village) => void;
   selectedVillageId?: string;
   clusters?: OutbreakCluster[];
+  flyToLocation?: { lat: number; lng: number } | null;
 }
 
-const VillageMap: React.FC<VillageMapProps> = ({ villages, onSelectVillage, selectedVillageId, clusters = [] }) => {
+const VillageMap: React.FC<VillageMapProps> = ({ villages, onSelectVillage, selectedVillageId, clusters = [], flyToLocation }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const layerGroupRef = useRef<any>(null);
@@ -44,13 +45,12 @@ const VillageMap: React.FC<VillageMapProps> = ({ villages, onSelectVillage, sele
     };
   }, []);
 
-  // Handle programatic selection (fly to location)
+  // Handle programatic selection (fly to existing village)
   useEffect(() => {
     if (!selectedVillageId || !mapInstanceRef.current) return;
     
     const village = villages.find(v => v.id === selectedVillageId);
     if (village) {
-      const L = (window as any).L;
       // Fly to the location with animation
       mapInstanceRef.current.flyTo(
         [village.coordinates.lat, village.coordinates.lng], 
@@ -59,6 +59,17 @@ const VillageMap: React.FC<VillageMapProps> = ({ villages, onSelectVillage, sele
       );
     }
   }, [selectedVillageId, villages]);
+
+  // Handle manual search fly to (fly to arbitrary location)
+  useEffect(() => {
+    if (!flyToLocation || !mapInstanceRef.current) return;
+
+    mapInstanceRef.current.flyTo(
+        [flyToLocation.lat, flyToLocation.lng],
+        12,
+        { animate: true, duration: 1.5 }
+    );
+  }, [flyToLocation]);
 
   // Update Markers & Clusters
   useEffect(() => {

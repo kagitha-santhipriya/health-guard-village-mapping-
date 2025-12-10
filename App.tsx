@@ -1,12 +1,10 @@
-
-
 import React, { useState, useEffect } from 'react';
 import { INITIAL_VILLAGES } from './constants';
 import { Village, CaseReport, HealthStatus, AIAnalysisResult, OutbreakCluster, Comment } from './types';
 import { analyzeVillageHealth, analyzeClusters } from './services/geminiService';
 import VillageMap from './components/VillageMap';
 import AshaForm from './components/AshaForm';
-import { Activity, Map as MapIcon, ShieldAlert, UserCheck, AlertTriangle, ArrowRight, Search, Database, LandPlot, Stethoscope, MessageSquare, Send } from 'lucide-react';
+import { Activity, Map as MapIcon, ShieldAlert, UserCheck, AlertTriangle, ArrowRight, Search, Database, LandPlot, Stethoscope, MessageSquare, Send, Loader2 } from 'lucide-react';
 
 // Main App Component
 const App: React.FC = () => {
@@ -33,6 +31,10 @@ const App: React.FC = () => {
   const [latestAnalysis, setLatestAnalysis] = useState<{ villageName: string; result: AIAnalysisResult } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [commentText, setCommentText] = useState('');
+
+  // Search States
+  const [flyToLocation, setFlyToLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [isGlobalSearching, setIsGlobalSearching] = useState(false);
 
   // Persist villages to LocalStorage whenever they change
   useEffect(() => {
@@ -123,19 +125,45 @@ const App: React.FC = () => {
     setIsAnalyzing(false);
   };
 
-  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const query = e.target.value;
-    setSearchQuery(query);
+  const handleGlobalSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
 
-    if (query.trim() === '') return;
+    // 1. Try Local Search first (Exact match preference)
+    const localMatch = villages.find(v => v.name.toLowerCase() === searchQuery.toLowerCase());
+    if (localMatch) {
+      setSelectedVillageId(localMatch.id);
+      setFlyToLocation(null);
+      return;
+    }
 
-    // Find the first village that matches the query
-    const match = villages.find(v => 
-      v.name.toLowerCase().includes(query.toLowerCase())
-    );
+    // 2. Try Local Search (Partial match)
+    const partialMatch = villages.find(v => v.name.toLowerCase().includes(searchQuery.toLowerCase()));
+    if (partialMatch) {
+      setSelectedVillageId(partialMatch.id);
+      setFlyToLocation(null);
+      return;
+    }
 
-    if (match) {
-      setSelectedVillageId(match.id);
+    // 3. Global Search (Geocoding) if not in database
+    setIsGlobalSearching(true);
+    try {
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery + ', India')}`);
+      const data = await response.json();
+      
+      if (data && data.length > 0) {
+        const { lat, lon } = data[0];
+        // Deselect any currently selected village as we are flying to a raw location
+        setSelectedVillageId(undefined);
+        setFlyToLocation({ lat: parseFloat(lat), lng: parseFloat(lon) });
+      } else {
+        alert("Location not found in database or map.");
+      }
+    } catch (e) {
+      console.error("Global search failed", e);
+      alert("Unable to search map.");
+    } finally {
+      setIsGlobalSearching(false);
     }
   };
 
@@ -244,16 +272,25 @@ const App: React.FC = () => {
               {/* Map Container */}
               <div className="space-y-4">
                  {/* Search Bar */}
-                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                  <input 
-                      type="text" 
-                      placeholder="Search village by name..." 
-                      className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 shadow-sm focus:ring-2 focus:ring-blue-500 outline-none transition-shadow"
-                      value={searchQuery}
-                      onChange={handleSearch}
-                  />
-                </div>
+                 <form onSubmit={handleGlobalSearch} className="relative flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                    <input 
+                        type="text" 
+                        placeholder="Search village name or global location..." 
+                        className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 shadow-sm focus:ring-2 focus:ring-blue-500 outline-none transition-shadow"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                  </div>
+                  <button 
+                    type="submit" 
+                    className="bg-blue-600 text-white px-5 rounded-xl font-medium hover:bg-blue-700 transition flex items-center justify-center min-w-[100px]"
+                    disabled={isGlobalSearching}
+                  >
+                    {isGlobalSearching ? <Loader2 className="animate-spin w-5 h-5" /> : "Search"}
+                  </button>
+                </form>
 
                 {/* Map Component */}
                 <div className="h-[500px]">
@@ -265,6 +302,7 @@ const App: React.FC = () => {
                       }} 
                       selectedVillageId={selectedVillageId}
                       clusters={clusters}
+                      flyToLocation={flyToLocation}
                     />
                 </div>
               </div>
