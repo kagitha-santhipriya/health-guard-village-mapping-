@@ -1,8 +1,7 @@
-
 import React, { useState } from 'react';
 import { Village, CaseReport } from '../types';
 import { DISEASES } from '../constants';
-import { Loader2, Send, User, MapPin, Trash2, LocateFixed, Search, Stethoscope } from 'lucide-react';
+import { Loader2, Send, User, MapPin, Trash2, LocateFixed, Search, Stethoscope, CheckCircle } from 'lucide-react';
 
 interface AshaFormProps {
   villages: Village[];
@@ -17,6 +16,7 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
   const [workerLocation, setWorkerLocation] = useState('');
   const [isLocating, setIsLocating] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
+  const [foundAddress, setFoundAddress] = useState<string>('');
   
   // Health Details
   const [diseaseType, setDiseaseType] = useState<string>('');
@@ -31,10 +31,23 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
     setIsLocating(true);
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
-        (position) => {
+        async (position) => {
           const { latitude, longitude } = position.coords;
           setWorkerLocation(`${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
           setIsLocating(false);
+          setFoundAddress("GPS Coordinates Acquired");
+          
+          // Optional: Reverse Geocode to check where they are
+          try {
+             const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+             const data = await res.json();
+             if (data && data.display_name) {
+               setFoundAddress(data.display_name);
+             }
+          } catch(e) {
+             console.log("Reverse geocode failed", e);
+          }
+
         },
         (error) => {
           alert("Unable to retrieve location. Please enter manually.");
@@ -53,15 +66,18 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
       return;
     }
     setIsGeocoding(true);
+    setFoundAddress('');
     try {
       // Search for the village in India to avoid ambiguity
+      // We append India to ensure we don't find US cities etc.
       const query = `${selectedVillageName}, India`;
-      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
       const data = await response.json();
       
       if (data && data.length > 0) {
-        const { lat, lon } = data[0];
+        const { lat, lon, display_name } = data[0];
         setWorkerLocation(`${parseFloat(lat).toFixed(5)}, ${parseFloat(lon).toFixed(5)}`);
+        setFoundAddress(display_name);
       } else {
         alert("Location not found automatically. Please enter coordinates manually or use GPS.");
       }
@@ -118,6 +134,8 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
     setNotes('');
     setDiseaseType('');
     setSanitationStatus('Good');
+    setWorkerLocation('');
+    setFoundAddress('');
   };
 
   return (
@@ -207,8 +225,16 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
                 </button>
               </div>
             </div>
+            
+            {foundAddress && (
+              <div className="mt-2 text-xs text-green-700 bg-green-50 p-2 rounded border border-green-200 flex items-start gap-2 animate-in fade-in">
+                 <CheckCircle className="w-3 h-3 mt-0.5 shrink-0" />
+                 <span><b>Detected:</b> {foundAddress}</span>
+              </div>
+            )}
+            
             <p className="text-[10px] text-slate-500 mt-1">
-                * Click "Find Coords" to get location of the village entered, or "My GPS" for your current position.
+                * Click "Find Coords" to auto-detect location, or "My GPS" for your exact position.
             </p>
           </div>
         </div>

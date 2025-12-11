@@ -14,6 +14,7 @@ const VillageMap: React.FC<VillageMapProps> = ({ villages, onSelectVillage, sele
   const mapInstanceRef = useRef<any>(null);
   const layerGroupRef = useRef<any>(null);
   const clusterLayerGroupRef = useRef<any>(null);
+  const tempMarkerRef = useRef<any>(null);
 
   // Initialize Map
   useEffect(() => {
@@ -55,6 +56,12 @@ const VillageMap: React.FC<VillageMapProps> = ({ villages, onSelectVillage, sele
     
     const village = villages.find(v => v.id === selectedVillageId);
     if (village) {
+      // Remove temp marker if selecting a real village
+      if (tempMarkerRef.current) {
+        tempMarkerRef.current.remove();
+        tempMarkerRef.current = null;
+      }
+
       // Fly to the location with animation
       mapInstanceRef.current.flyTo(
         [village.coordinates.lat, village.coordinates.lng], 
@@ -68,11 +75,49 @@ const VillageMap: React.FC<VillageMapProps> = ({ villages, onSelectVillage, sele
   useEffect(() => {
     if (!flyToLocation || !mapInstanceRef.current) return;
 
+    const L = (window as any).L;
+    
+    // Fly to location
     mapInstanceRef.current.flyTo(
         [flyToLocation.lat, flyToLocation.lng],
         12,
         { animate: true, duration: 1.5 }
     );
+
+    // Add a temporary marker so user knows where the search landed
+    if (tempMarkerRef.current) tempMarkerRef.current.remove();
+    
+    tempMarkerRef.current = L.marker([flyToLocation.lat, flyToLocation.lng], {
+        // Create a custom blue pin for search results
+        icon: L.divIcon({
+            className: 'custom-search-pin',
+            html: `<div style="
+              background-color: #3b82f6; 
+              width: 16px; 
+              height: 16px; 
+              border-radius: 50%; 
+              border: 3px solid white; 
+              box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+              position: relative;
+            ">
+              <div style="
+                position: absolute;
+                bottom: -8px;
+                left: 50%;
+                transform: translateX(-50%);
+                width: 2px;
+                height: 8px;
+                background-color: #3b82f6;
+              "></div>
+            </div>`,
+            iconSize: [16, 24],
+            iconAnchor: [8, 24]
+        })
+    })
+    .addTo(mapInstanceRef.current)
+    .bindPopup(`<div class="text-center font-bold text-slate-700">Searched Location</div>`)
+    .openPopup();
+
   }, [flyToLocation]);
 
   // Update Markers & Clusters

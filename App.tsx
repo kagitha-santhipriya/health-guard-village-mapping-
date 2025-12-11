@@ -4,7 +4,7 @@ import { Village, CaseReport, HealthStatus, AIAnalysisResult, OutbreakCluster, C
 import { analyzeVillageHealth, analyzeClusters } from './services/geminiService';
 import VillageMap from './components/VillageMap';
 import AshaForm from './components/AshaForm';
-import { Activity, Map as MapIcon, ShieldAlert, UserCheck, AlertTriangle, ArrowRight, Search, Database, LandPlot, Stethoscope, MessageSquare, Send, Loader2 } from 'lucide-react';
+import { Activity, Map as MapIcon, ShieldAlert, UserCheck, AlertTriangle, ArrowRight, Search, Database, LandPlot, Stethoscope, MessageSquare, Send, Loader2, ClipboardList, Lightbulb } from 'lucide-react';
 
 // Main App Component
 const App: React.FC = () => {
@@ -28,7 +28,6 @@ const App: React.FC = () => {
   const [clusters, setClusters] = useState<OutbreakCluster[]>([]);
   const [selectedVillageId, setSelectedVillageId] = useState<string | undefined>(undefined);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [latestAnalysis, setLatestAnalysis] = useState<{ villageName: string; result: AIAnalysisResult } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [commentText, setCommentText] = useState('');
 
@@ -71,14 +70,14 @@ const App: React.FC = () => {
       setIsGlobalSearching(true);
       try {
         const query = `${searchQuery}, India`;
-        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1&addressdetails=1`);
         const data = await response.json();
         
         if (data && data.length > 0) {
-          const { lat, lon } = data[0];
+          const { lat, lon, display_name } = data[0];
           setFlyToLocation({ lat: parseFloat(lat), lng: parseFloat(lon) });
           setSelectedVillageId(undefined); // Deselect current as it's not in DB
-          alert(`Village not in monitored list, but found on map. Navigating to ${data[0].display_name.split(',')[0]}.`);
+          alert(`Found on map: ${display_name.split(',').slice(0, 3).join(',')}`);
         } else {
           alert("Village not found in database or on global map.");
         }
@@ -126,12 +125,7 @@ const App: React.FC = () => {
     // AI Analysis
     const analysis = await analyzeVillageHealth(village, report);
     
-    setLatestAnalysis({
-      villageName: village.name,
-      result: analysis
-    });
-
-    // Update Village State
+    // Update Village State with new report and Analysis Result
     const updatedVillage: Village = {
       ...village,
       activeCases: village.activeCases + report.affectedCount,
@@ -139,7 +133,8 @@ const App: React.FC = () => {
       lastReported: new Date().toISOString(),
       lastAshaWorker: report.workerName,
       dominantSymptoms: Array.from(new Set([...village.dominantSymptoms, report.symptoms.split(',')[0] || 'Unknown'])),
-      comments: village.comments || []
+      comments: village.comments || [],
+      lastAnalysis: analysis // STORE analysis directly in village
     };
 
     if (isNewVillage) {
@@ -150,7 +145,11 @@ const App: React.FC = () => {
 
     setIsAnalyzing(false);
     
-    // Switch to results view indirectly via state, but we usually stay on ASHA tab to show result
+    // Auto-switch to Government Dashboard and select the village to show details
+    setActiveTab('gov');
+    setTimeout(() => {
+        setSelectedVillageId(updatedVillage.id);
+    }, 100);
   };
 
   const handleAddComment = (villageId: string) => {
@@ -302,7 +301,8 @@ const App: React.FC = () => {
 
               {/* Village Details Section */}
               {selectedVillage ? (
-                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 animate-in slide-in-from-right duration-300">
+                  {/* Village Header */}
                   <div className="flex justify-between items-start">
                     <div>
                       <h2 className="text-xl font-bold text-slate-800">{selectedVillage.name}</h2>
@@ -319,6 +319,7 @@ const App: React.FC = () => {
                     </span>
                   </div>
 
+                  {/* Key Stats */}
                   <div className="grid grid-cols-2 gap-3 text-sm">
                      <div className="bg-slate-50 p-3 rounded-lg">
                         <p className="text-slate-500 text-xs">Active Cases</p>
@@ -330,14 +331,51 @@ const App: React.FC = () => {
                      </div>
                   </div>
 
+                  {/* Survey Details */}
                   <div className="space-y-2">
-                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide">Last Report</h4>
+                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1">
+                        <ClipboardList className="w-3 h-3" /> Survey Details
+                    </h4>
                     <div className="text-sm text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-100">
                       <p><span className="font-medium">Reporter:</span> {selectedVillage.lastAshaWorker || 'Unknown'}</p>
                       <p><span className="font-medium">Symptoms:</span> {selectedVillage.dominantSymptoms.length > 0 ? selectedVillage.dominantSymptoms.join(', ') : 'None reported'}</p>
                       <p className="text-xs text-slate-400 mt-2">{new Date(selectedVillage.lastReported).toLocaleString()}</p>
                     </div>
                   </div>
+
+                  {/* Latest AI Analysis (Visible if available) */}
+                  {selectedVillage.lastAnalysis && (
+                    <div className="space-y-3 bg-indigo-50 p-4 rounded-xl border border-indigo-100">
+                        <div className="flex justify-between items-center">
+                            <h4 className="text-xs font-bold text-indigo-800 uppercase tracking-wide flex items-center gap-1">
+                                <Database className="w-3 h-3" /> AI Prediction
+                            </h4>
+                            <span className="text-xs font-bold text-indigo-600">{selectedVillage.lastAnalysis.predictedOutbreakChance}% Outbreak Prob.</span>
+                        </div>
+                        
+                        <div className="bg-white p-3 rounded-lg border border-indigo-50 shadow-sm">
+                             <p className="text-sm font-bold text-indigo-900 mb-1 flex items-center gap-1">
+                                <Stethoscope className="w-3 h-3" /> {selectedVillage.lastAnalysis.possibleDiagnosis}
+                             </p>
+                             <p className="text-xs text-slate-600 leading-snug">
+                                {selectedVillage.lastAnalysis.reasoning}
+                             </p>
+                        </div>
+
+                        <div>
+                            <h5 className="text-xs font-bold text-indigo-800 mb-2 flex items-center gap-1">
+                                <Lightbulb className="w-3 h-3" /> Recommended Actions
+                            </h5>
+                            <ul className="space-y-1">
+                                {selectedVillage.lastAnalysis.recommendedActions.slice(0, 3).map((action, i) => (
+                                    <li key={i} className="text-xs flex gap-2 text-indigo-900 bg-white/50 p-1.5 rounded">
+                                        <span className="font-bold">•</span> {action}
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    </div>
+                  )}
 
                   {/* Comments Section */}
                   <div className="pt-4 border-t border-slate-100">
@@ -412,69 +450,9 @@ const App: React.FC = () => {
                   <li className="flex gap-2 items-start"><ArrowRight className="w-4 h-4 mt-0.5 shrink-0"/> Ensure GPS location is accurate when reporting new cases.</li>
                   <li className="flex gap-2 items-start"><ArrowRight className="w-4 h-4 mt-0.5 shrink-0"/> Report "Worst" sanitation immediately if drainage is blocked.</li>
                   <li className="flex gap-2 items-start"><ArrowRight className="w-4 h-4 mt-0.5 shrink-0"/> If disease is unknown, list all symptoms clearly for AI diagnosis.</li>
+                  <li className="flex gap-2 items-start"><ArrowRight className="w-4 h-4 mt-0.5 shrink-0 text-yellow-300"/> <b>Note:</b> After submitting, you will be redirected to the Gov Portal to view the registered Action Plan.</li>
                 </ul>
               </div>
-
-              {latestAnalysis && (
-                <div className="bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  <div className="bg-slate-900 text-white p-4 border-b border-slate-800 flex justify-between items-center">
-                    <h3 className="font-bold flex items-center gap-2">
-                      <Database className="w-4 h-4 text-green-400" />
-                      AI Analysis Result
-                    </h3>
-                    <span className="text-xs text-slate-400">For: {latestAnalysis.villageName}</span>
-                  </div>
-                  
-                  <div className="p-6 space-y-5">
-                    
-                    {/* Risk Meter */}
-                    <div className="flex items-center justify-between bg-slate-50 p-4 rounded-lg border border-slate-100">
-                      <div>
-                        <p className="text-xs text-slate-500 uppercase font-bold tracking-wider">Risk Assessment</p>
-                        <p className={`text-2xl font-bold ${
-                          latestAnalysis.result.riskLevel === HealthStatus.RED ? 'text-red-600' :
-                          latestAnalysis.result.riskLevel === HealthStatus.YELLOW ? 'text-yellow-600' : 'text-green-600'
-                        }`}>{latestAnalysis.result.riskLevel}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs text-slate-500 uppercase font-bold tracking-wider">Outbreak Probability</p>
-                        <p className="text-2xl font-bold text-slate-800">{latestAnalysis.result.predictedOutbreakChance}%</p>
-                      </div>
-                    </div>
-
-                    {/* AI Diagnosis */}
-                    <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg">
-                       <h4 className="text-sm font-bold text-blue-900 mb-1 flex items-center gap-2">
-                         <Stethoscope className="w-4 h-4" /> AI Diagnosis
-                       </h4>
-                       <p className="text-blue-800 font-medium">{latestAnalysis.result.possibleDiagnosis || "Could not determine"}</p>
-                    </div>
-
-                    {/* Reasoning */}
-                    <div>
-                      <h4 className="text-sm font-bold text-slate-700 mb-2">Analysis Reasoning</h4>
-                      <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-3 rounded border border-slate-100">
-                        {latestAnalysis.result.reasoning}
-                      </p>
-                    </div>
-
-                    {/* Actions */}
-                    <div>
-                      <h4 className="text-sm font-bold text-slate-700 mb-3">Recommended Actions</h4>
-                      <ul className="space-y-2">
-                        {latestAnalysis.result.recommendedActions.map((action, i) => (
-                          <li key={i} className="flex gap-3 text-sm text-slate-700 bg-white border border-slate-200 p-2.5 rounded shadow-sm">
-                            <span className="bg-indigo-100 text-indigo-700 w-5 h-5 flex items-center justify-center rounded-full text-xs font-bold shrink-0">
-                              {i + 1}
-                            </span>
-                            {action}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         )}

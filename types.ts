@@ -1,5 +1,4 @@
 
-
 export enum HealthStatus {
   GREEN = 'Green', // Safe
   YELLOW = 'Yellow', // Moderate Risk
@@ -18,6 +17,14 @@ export interface Comment {
   timestamp: string;
 }
 
+export interface AIAnalysisResult {
+  riskLevel: HealthStatus;
+  reasoning: string;
+  recommendedActions: string[];
+  predictedOutbreakChance: number; // 0-100
+  possibleDiagnosis: string; // AI predicted disease based on symptoms
+}
+
 export interface Village {
   id: string;
   name: string;
@@ -30,6 +37,7 @@ export interface Village {
   lastAshaWorker?: string; // To track who reported
   dominantSymptoms: string[];
   comments: Comment[];
+  lastAnalysis?: AIAnalysisResult; // Persist the latest AI findings
 }
 
 export interface CaseReport {
@@ -48,14 +56,6 @@ export interface CaseReport {
   affectedCount: number;
   timestamp: string;
   notes: string;
-}
-
-export interface AIAnalysisResult {
-  riskLevel: HealthStatus;
-  reasoning: string;
-  recommendedActions: string[];
-  predictedOutbreakChance: number; // 0-100
-  possibleDiagnosis: string; // AI predicted disease based on symptoms
 }
 
 export interface OutbreakCluster {
