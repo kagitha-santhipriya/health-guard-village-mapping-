@@ -55,277 +55,244 @@ const App: React.FC = () => {
   const redZones = villages.filter(v => v.status === HealthStatus.RED).length;
   const yellowZones = villages.filter(v => v.status === HealthStatus.YELLOW).length;
 
+  // Handle Search (Local + Global)
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+
+    // 1. Try finding in local database
+    const found = villages.find(v => v.name.toLowerCase().includes(searchQuery.toLowerCase()));
+    
+    if (found) {
+      setSelectedVillageId(found.id);
+      setFlyToLocation(null); // Reset fly to since selection handles it
+    } else {
+      // 2. If not found, search OSM globally
+      setIsGlobalSearching(true);
+      try {
+        const query = `${searchQuery}, India`;
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+        const data = await response.json();
+        
+        if (data && data.length > 0) {
+          const { lat, lon } = data[0];
+          setFlyToLocation({ lat: parseFloat(lat), lng: parseFloat(lon) });
+          setSelectedVillageId(undefined); // Deselect current as it's not in DB
+          alert(`Village not in monitored list, but found on map. Navigating to ${data[0].display_name.split(',')[0]}.`);
+        } else {
+          alert("Village not found in database or on global map.");
+        }
+      } catch (err) {
+        console.error("Global search failed", err);
+        alert("Search failed. Please try again.");
+      } finally {
+        setIsGlobalSearching(false);
+      }
+    }
+  };
+
   const handleReportSubmit = async (report: CaseReport, villageName: string) => {
     setIsAnalyzing(true);
     
-    // Check if village already exists
-    let currentVillage = villages.find(v => v.id === report.villageId);
+    // Find village or create a temporary structure for analysis if new
+    let village = villages.find(v => v.id === report.villageId);
     let isNewVillage = false;
 
-    // If village doesn't exist (Dynamic Creation)
-    if (!currentVillage) {
+    if (!village) {
       isNewVillage = true;
-      
-      // Parse Coordinates from workerLocation
-      // Expecting format "lat, lng"
-      const coords = report.workerLocation.replace(/[^\d.,-]/g, '').split(',').map(s => parseFloat(s));
-      
-      let lat = coords[0];
-      let lng = coords[1];
-
-      // Fallback if parsing fails (though form validation tries to prevent this)
-      if (isNaN(lat) || isNaN(lng)) {
-        alert("Could not determine valid location coordinates. Please use the 'Find Coords' button.");
-        setIsAnalyzing(false);
-        return;
+      // Parse coordinates from report (expected format "lat, lng")
+      let coords = { lat: 20.5937, lng: 78.9629 }; // Default India center
+      if (report.workerLocation && report.workerLocation.includes(',')) {
+        const [lat, lng] = report.workerLocation.split(',').map(s => parseFloat(s.trim()));
+        if (!isNaN(lat) && !isNaN(lng)) {
+          coords = { lat, lng };
+        }
       }
 
-      currentVillage = {
+      village = {
         id: report.villageId,
         name: villageName,
-        district: "New Region", // Default for dynamically added
-        coordinates: { lat, lng },
-        population: 2000, // Estimate for new villages
+        district: 'Detected via GPS',
+        coordinates: coords,
+        population: 1000, // Default estimate
         activeCases: 0,
         status: HealthStatus.GREEN,
         lastReported: new Date().toISOString(),
         dominantSymptoms: [],
-        lastAshaWorker: report.workerName,
         comments: []
       };
     }
+    
+    // AI Analysis
+    const analysis = await analyzeVillageHealth(village, report);
+    
+    setLatestAnalysis({
+      villageName: village.name,
+      result: analysis
+    });
 
-    // Call Gemini AI
-    const analysis = await analyzeVillageHealth(currentVillage, report);
-
-    // Update State
-    const updatedVillageState: Village = {
-      ...currentVillage,
-      activeCases: currentVillage.activeCases + report.affectedCount,
+    // Update Village State
+    const updatedVillage: Village = {
+      ...village,
+      activeCases: village.activeCases + report.affectedCount,
       status: analysis.riskLevel,
       lastReported: new Date().toISOString(),
-      lastAshaWorker: report.workerName, // Save the worker name
-      dominantSymptoms: [...new Set([...currentVillage.dominantSymptoms, ...report.symptoms.split(',').map(s => s.trim())])].slice(0, 3)
+      lastAshaWorker: report.workerName,
+      dominantSymptoms: Array.from(new Set([...village.dominantSymptoms, report.symptoms.split(',')[0] || 'Unknown'])),
+      comments: village.comments || []
     };
 
     if (isNewVillage) {
-      setVillages(prev => [...prev, updatedVillageState]);
+      setVillages(prev => [...prev, updatedVillage]);
     } else {
-      setVillages(prev => prev.map(v => v.id === updatedVillageState.id ? updatedVillageState : v));
+      setVillages(prev => prev.map(v => v.id === updatedVillage.id ? updatedVillage : v));
     }
 
-    setLatestAnalysis({
-      villageName: currentVillage.name,
-      result: analysis
-    });
-    
-    // Switch to Gov view to see the update map and alert
-    setActiveTab('gov');
-    setSelectedVillageId(currentVillage.id);
     setIsAnalyzing(false);
+    
+    // Switch to results view indirectly via state, but we usually stay on ASHA tab to show result
   };
 
-  const handleGlobalSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
-
-    // 1. Try Local Search first (Exact match preference)
-    const localMatch = villages.find(v => v.name.toLowerCase() === searchQuery.toLowerCase());
-    if (localMatch) {
-      setSelectedVillageId(localMatch.id);
-      setFlyToLocation(null);
-      return;
-    }
-
-    // 2. Try Local Search (Partial match)
-    const partialMatch = villages.find(v => v.name.toLowerCase().includes(searchQuery.toLowerCase()));
-    if (partialMatch) {
-      setSelectedVillageId(partialMatch.id);
-      setFlyToLocation(null);
-      return;
-    }
-
-    // 3. Global Search (Geocoding) if not in database
-    setIsGlobalSearching(true);
-    try {
-      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery + ', India')}`);
-      const data = await response.json();
-      
-      if (data && data.length > 0) {
-        const { lat, lon } = data[0];
-        // Deselect any currently selected village as we are flying to a raw location
-        setSelectedVillageId(undefined);
-        setFlyToLocation({ lat: parseFloat(lat), lng: parseFloat(lon) });
-      } else {
-        alert("Location not found in database or map.");
-      }
-    } catch (e) {
-      console.error("Global search failed", e);
-      alert("Unable to search map.");
-    } finally {
-      setIsGlobalSearching(false);
-    }
-  };
-
-  const handleAddComment = () => {
-    if (!selectedVillageId || !commentText.trim()) return;
-
+  const handleAddComment = (villageId: string) => {
+    if (!commentText.trim()) return;
+    
     const newComment: Comment = {
       id: crypto.randomUUID(),
       author: 'Public User',
-      text: commentText.trim(),
+      text: commentText,
       timestamp: new Date().toISOString()
     };
 
-    setVillages(prev => prev.map(v => 
-      v.id === selectedVillageId 
-        ? { ...v, comments: [newComment, ...(v.comments || [])] }
-        : v
-    ));
-    setCommentText('');
-  };
+    setVillages(prev => prev.map(v => {
+      if (v.id === villageId) {
+        return {
+          ...v,
+          comments: [newComment, ...(v.comments || [])]
+        };
+      }
+      return v;
+    }));
 
-  // Reset Data for Demo purposes
-  const handleResetData = () => {
-    if (confirm("Reset all data to initial demo state?")) {
-      setVillages(INITIAL_VILLAGES);
-      setClusters([]);
-      localStorage.removeItem('healthguard_villages');
-      window.location.reload();
-    }
+    setCommentText('');
   };
 
   const selectedVillage = villages.find(v => v.id === selectedVillageId);
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
+    <div className="min-h-screen flex flex-col font-sans bg-slate-50">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="bg-blue-600 p-1.5 rounded-lg">
-              <Activity className="w-6 h-6 text-white" />
+      <header className="bg-indigo-900 text-white p-4 shadow-lg sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-3">
+            <div className="bg-white/10 p-2 rounded-lg">
+              <Activity className="w-6 h-6 text-indigo-300" />
             </div>
-            <h1 className="text-xl font-bold bg-gradient-to-r from-blue-700 to-indigo-600 bg-clip-text text-transparent">
-              HealthGuard
-            </h1>
+            <div>
+              <h1 className="text-xl font-bold tracking-tight">HealthGuard <span className="text-indigo-300 font-normal">AI</span></h1>
+              <p className="text-xs text-indigo-200">Real-time Epidemic Monitoring System</p>
+            </div>
           </div>
           
-          <div className="flex items-center gap-4">
-            <div className="flex bg-slate-100 p-1 rounded-lg">
-              <button
-                onClick={() => setActiveTab('asha')}
-                className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                  activeTab === 'asha' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                <UserCheck className="w-4 h-4" /> ASHA Portal
-              </button>
-              <button
-                onClick={() => setActiveTab('gov')}
-                className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                  activeTab === 'gov' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                <MapIcon className="w-4 h-4" /> Gov Dashboard
-              </button>
-            </div>
-            <button onClick={handleResetData} className="text-xs text-slate-400 hover:text-red-500" title="Reset Demo Data">
-              <Database className="w-4 h-4" />
-            </button>
+          <div className="flex gap-6 text-sm font-medium">
+             <div className="flex flex-col items-center">
+                <span className="text-2xl font-bold text-white leading-none">{totalCases}</span>
+                <span className="text-indigo-300 text-[10px] uppercase">Active Cases</span>
+             </div>
+             <div className="w-px bg-indigo-700 h-8"></div>
+             <div className="flex flex-col items-center">
+                <span className="text-2xl font-bold text-red-400 leading-none">{redZones}</span>
+                <span className="text-red-200 text-[10px] uppercase">Red Zones</span>
+             </div>
+             <div className="w-px bg-indigo-700 h-8"></div>
+             <div className="flex flex-col items-center">
+                <span className="text-2xl font-bold text-yellow-400 leading-none">{yellowZones}</span>
+                <span className="text-yellow-200 text-[10px] uppercase">Warnings</span>
+             </div>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        
-        {activeTab === 'asha' ? (
-          <div className="max-w-xl mx-auto animate-in fade-in duration-300">
-            <AshaForm 
-              villages={villages} 
-              onSubmitReport={handleReportSubmit} 
-              isSubmitting={isAnalyzing} 
-            />
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full animate-in fade-in duration-300">
-            
-            {/* Left Column: Stats & Map */}
-            <div className="lg:col-span-2 space-y-6">
-              {/* Stats Cards */}
-              <div className="grid grid-cols-3 gap-4">
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-                  <p className="text-xs font-semibold text-slate-500 uppercase">Active Cases</p>
-                  <p className="text-2xl font-bold text-slate-800 mt-1">{totalCases}</p>
-                </div>
-                <div className="bg-red-50 p-4 rounded-xl shadow-sm border border-red-100">
-                  <p className="text-xs font-semibold text-red-600 uppercase">Critical Zones</p>
-                  <p className="text-2xl font-bold text-red-700 mt-1">{redZones}</p>
-                </div>
-                <div className="bg-yellow-50 p-4 rounded-xl shadow-sm border border-yellow-100">
-                  <p className="text-xs font-semibold text-yellow-600 uppercase">Watch List</p>
-                  <p className="text-2xl font-bold text-yellow-700 mt-1">{yellowZones}</p>
-                </div>
-              </div>
+      {/* Navigation Tabs */}
+      <div className="bg-white border-b border-slate-200 shadow-sm sticky top-[72px] z-40">
+        <div className="max-w-7xl mx-auto flex justify-center">
+          <button
+            onClick={() => setActiveTab('gov')}
+            className={`flex-1 py-4 text-sm font-medium border-b-2 transition-colors flex justify-center items-center gap-2
+              ${activeTab === 'gov' ? 'border-indigo-600 text-indigo-700 bg-indigo-50/50' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+          >
+            <ShieldAlert className="w-4 h-4" /> Government Dashboard
+          </button>
+          <button
+            onClick={() => setActiveTab('asha')}
+            className={`flex-1 py-4 text-sm font-medium border-b-2 transition-colors flex justify-center items-center gap-2
+              ${activeTab === 'asha' ? 'border-blue-600 text-blue-700 bg-blue-50/50' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+          >
+            <UserCheck className="w-4 h-4" /> ASHA Worker Portal
+          </button>
+        </div>
+      </div>
 
-              {/* Map Container */}
-              <div className="space-y-4">
-                 {/* Search Bar */}
-                 <form onSubmit={handleGlobalSearch} className="relative flex gap-2">
+      {/* Main Content */}
+      <main className="flex-1 max-w-7xl mx-auto w-full p-4 md:p-6 space-y-6">
+        
+        {activeTab === 'gov' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
+            
+            {/* Left Panel: Map & Search */}
+            <div className="lg:col-span-2 space-y-4 flex flex-col h-full">
+               {/* Search Bar */}
+               <form onSubmit={handleSearch} className="flex gap-2 relative z-10">
                   <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                    <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
                     <input 
-                        type="text" 
-                        placeholder="Search village name or global location..." 
-                        className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 shadow-sm focus:ring-2 focus:ring-blue-500 outline-none transition-shadow"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
+                      type="text" 
+                      placeholder="Search village name to locate..."
+                      className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
                     />
                   </div>
                   <button 
                     type="submit" 
-                    className="bg-blue-600 text-white px-5 rounded-xl font-medium hover:bg-blue-700 transition flex items-center justify-center min-w-[100px]"
                     disabled={isGlobalSearching}
+                    className="bg-indigo-600 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-indigo-700 shadow-sm disabled:opacity-70 flex items-center gap-2"
                   >
-                    {isGlobalSearching ? <Loader2 className="animate-spin w-5 h-5" /> : "Search"}
+                    {isGlobalSearching ? <Loader2 className="w-4 h-4 animate-spin"/> : <Search className="w-4 h-4" />}
+                    Locate
                   </button>
-                </form>
+               </form>
 
-                {/* Map Component */}
-                <div className="h-[500px]">
-                   <VillageMap 
-                      villages={villages} 
-                      onSelectVillage={(v) => {
-                        setSelectedVillageId(v.id);
-                        setSearchQuery(''); // Optional: clear search on manual selection
-                      }} 
-                      selectedVillageId={selectedVillageId}
-                      clusters={clusters}
-                      flyToLocation={flyToLocation}
-                    />
-                </div>
-              </div>
+               {/* Map Container */}
+               <div className="flex-grow min-h-[500px] rounded-xl overflow-hidden border border-slate-300 shadow-sm relative">
+                  <VillageMap 
+                    villages={villages} 
+                    onSelectVillage={setSelectedVillageId as any} 
+                    selectedVillageId={selectedVillageId}
+                    clusters={clusters}
+                    flyToLocation={flyToLocation}
+                  />
+               </div>
             </div>
 
-            {/* Right Column: AI Insights & Village Details */}
-            <div className="lg:col-span-1 space-y-6">
+            {/* Right Panel: Details & Alerts */}
+            <div className="space-y-6 h-full overflow-y-auto pr-1">
               
-              {/* CLUSTER ALERT */}
+              {/* Clusters Alert Section */}
               {clusters.length > 0 && (
-                <div className="bg-red-50 border border-red-200 p-4 rounded-xl shadow-sm animate-pulse">
-                  <div className="flex items-center gap-2 mb-2 text-red-700 font-bold">
-                    <LandPlot className="w-5 h-5" />
-                    <h2>Regional Cluster Detected</h2>
+                <div className="bg-red-50 border border-red-200 rounded-xl p-4 shadow-sm animate-pulse-slow">
+                  <div className="flex items-center gap-2 text-red-800 font-bold mb-3">
+                    <AlertTriangle className="w-5 h-5" />
+                    <h3>Active Outbreak Clusters</h3>
                   </div>
                   <div className="space-y-3">
                     {clusters.map(cluster => (
-                      <div key={cluster.id} className="bg-white p-3 rounded-lg border border-red-100 text-sm">
-                        <p className="font-semibold text-slate-700 mb-1">
-                          Affected: {cluster.villageIds.length} Villages
-                        </p>
+                      <div key={cluster.id} className="bg-white p-3 rounded-lg border border-red-100 shadow-sm text-sm">
+                        <div className="flex justify-between items-start mb-2">
+                           <span className="font-semibold text-slate-700">Cluster: {cluster.villageIds.length} Villages</span>
+                           <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-bold uppercase">{cluster.severity}</span>
+                        </div>
                         <p className="text-slate-600 text-xs italic">
-                          "{cluster.aiAdvice}"
+                           AI Plan: "{cluster.aiAdvice}"
                         </p>
                       </div>
                     ))}
@@ -333,179 +300,181 @@ const App: React.FC = () => {
                 </div>
               )}
 
-              {/* Latest Alert Panel */}
-              {latestAnalysis && (
-                <div className="bg-gradient-to-br from-indigo-50 to-white p-6 rounded-xl shadow-md border border-indigo-100 animate-in slide-in-from-right duration-500">
-                  <div className="flex items-center gap-2 mb-3">
-                    <ShieldAlert className="w-5 h-5 text-indigo-600" />
-                    <h3 className="font-bold text-indigo-900">AI Risk Prediction</h3>
-                  </div>
-                  <div className="text-sm text-indigo-800 mb-4 bg-indigo-100/50 p-3 rounded-lg">
-                    Latest analysis for <strong>{latestAnalysis.villageName}</strong>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-slate-600">Predicted Risk:</span>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold 
-                        ${latestAnalysis.result.riskLevel === 'Red' ? 'bg-red-100 text-red-700' : 
-                          latestAnalysis.result.riskLevel === 'Yellow' ? 'bg-yellow-100 text-yellow-700' : 
-                          'bg-green-100 text-green-700'}`}>
-                        {latestAnalysis.result.riskLevel.toUpperCase()}
-                      </span>
+              {/* Village Details Section */}
+              {selectedVillage ? (
+                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-800">{selectedVillage.name}</h2>
+                      <p className="text-slate-500 text-sm flex items-center gap-1">
+                        <MapIcon className="w-3 h-3" /> {selectedVillage.district}
+                      </p>
                     </div>
-                    
-                    {/* NEW: AI Diagnosis */}
-                    <div className="flex flex-col gap-1 text-sm bg-white p-2 rounded border border-indigo-100">
-                      <div className="flex items-center gap-1 text-indigo-600 font-semibold">
-                        <Stethoscope className="w-3 h-3" />
-                        <span>AI Suspected Diagnosis:</span>
-                      </div>
-                      <span className="font-bold text-slate-800 pl-4">{latestAnalysis.result.possibleDiagnosis}</span>
-                    </div>
-
-                    <div className="flex justify-between items-center text-sm mt-2">
-                      <span className="text-slate-600">Outbreak Probability:</span>
-                      <span className="font-mono font-bold">{latestAnalysis.result.predictedOutbreakChance}%</span>
-                    </div>
-                    <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full ${latestAnalysis.result.predictedOutbreakChance > 70 ? 'bg-red-500' : 'bg-blue-500'}`} 
-                        style={{ width: `${latestAnalysis.result.predictedOutbreakChance}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    <p className="text-xs font-semibold text-slate-500 mb-2 uppercase">Recommended Actions</p>
-                    <ul className="space-y-2">
-                      {latestAnalysis.result.recommendedActions.map((action, idx) => (
-                        <li key={idx} className="flex items-start gap-2 text-sm text-slate-700">
-                          <ArrowRight className="w-3.5 h-3.5 text-indigo-400 mt-1 flex-shrink-0" />
-                          <span>{action}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              )}
-
-              {/* Village Details Card */}
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                  <h3 className="font-semibold text-slate-700">Village Details</h3>
-                  {selectedVillage && (
-                    <span className={`text-xs px-2 py-1 rounded-full border ${
-                      selectedVillage.status === 'Red' ? 'bg-red-50 border-red-200 text-red-600' :
-                      selectedVillage.status === 'Yellow' ? 'bg-yellow-50 border-yellow-200 text-yellow-600' :
-                      'bg-green-50 border-green-200 text-green-600'
+                    <span className={`px-3 py-1 rounded-full text-sm font-bold border ${
+                      selectedVillage.status === HealthStatus.GREEN ? 'bg-green-50 text-green-700 border-green-200' :
+                      selectedVillage.status === HealthStatus.YELLOW ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
+                      'bg-red-50 text-red-700 border-red-200'
                     }`}>
                       {selectedVillage.status} Zone
                     </span>
-                  )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                     <div className="bg-slate-50 p-3 rounded-lg">
+                        <p className="text-slate-500 text-xs">Active Cases</p>
+                        <p className="font-bold text-lg text-slate-800">{selectedVillage.activeCases}</p>
+                     </div>
+                     <div className="bg-slate-50 p-3 rounded-lg">
+                        <p className="text-slate-500 text-xs">Population</p>
+                        <p className="font-bold text-lg text-slate-800">{selectedVillage.population.toLocaleString()}</p>
+                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide">Last Report</h4>
+                    <div className="text-sm text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                      <p><span className="font-medium">Reporter:</span> {selectedVillage.lastAshaWorker || 'Unknown'}</p>
+                      <p><span className="font-medium">Symptoms:</span> {selectedVillage.dominantSymptoms.length > 0 ? selectedVillage.dominantSymptoms.join(', ') : 'None reported'}</p>
+                      <p className="text-xs text-slate-400 mt-2">{new Date(selectedVillage.lastReported).toLocaleString()}</p>
+                    </div>
+                  </div>
+
+                  {/* Comments Section */}
+                  <div className="pt-4 border-t border-slate-100">
+                    <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+                       <MessageSquare className="w-4 h-4" /> Public Comments
+                    </h4>
+                    
+                    <div className="space-y-3 mb-4 max-h-40 overflow-y-auto">
+                      {selectedVillage.comments && selectedVillage.comments.length > 0 ? (
+                        selectedVillage.comments.map(c => (
+                          <div key={c.id} className="text-xs bg-slate-50 p-2 rounded border border-slate-100">
+                            <p className="text-slate-700">{c.text}</p>
+                            <p className="text-[10px] text-slate-400 mt-1">{new Date(c.timestamp).toLocaleDateString()} • {c.author}</p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-xs text-slate-400 italic">No comments yet.</p>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2">
+                       <input 
+                         type="text" 
+                         placeholder="Add a comment..."
+                         className="flex-1 text-xs p-2 border border-slate-300 rounded focus:outline-none focus:border-indigo-500"
+                         value={commentText}
+                         onChange={(e) => setCommentText(e.target.value)}
+                       />
+                       <button 
+                         onClick={() => handleAddComment(selectedVillage.id)}
+                         className="bg-indigo-600 text-white p-2 rounded hover:bg-indigo-700"
+                       >
+                         <Send className="w-3 h-3" />
+                       </button>
+                    </div>
+                  </div>
+
                 </div>
-                
-                {selectedVillage ? (
-                  <div className="p-4 space-y-4">
-                    <div>
-                      <h2 className="text-2xl font-bold text-slate-800">{selectedVillage.name}</h2>
-                      <div className="flex items-center gap-2 text-sm text-slate-500">
-                        <span>Pop: {selectedVillage.population}</span>
-                        <span>•</span>
-                        <span>Dist: {selectedVillage.district}</span>
-                      </div>
-                    </div>
+              ) : (
+                <div className="bg-white border border-slate-200 rounded-xl p-8 shadow-sm flex flex-col items-center justify-center text-center h-64 text-slate-400">
+                   <LandPlot className="w-12 h-12 mb-2 opacity-20" />
+                   <p>Select a village on the map or use search to view details</p>
+                </div>
+              )}
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="p-3 bg-slate-50 rounded-lg">
-                        <p className="text-xs text-slate-500">Active Cases</p>
-                        <p className="text-lg font-bold text-slate-800">{selectedVillage.activeCases}</p>
-                      </div>
-                      <div className="p-3 bg-slate-50 rounded-lg">
-                        <p className="text-xs text-slate-500">Last Reporter</p>
-                        <p className="text-sm font-medium text-slate-800 truncate" title={selectedVillage.lastAshaWorker || 'System'}>
-                          {selectedVillage.lastAshaWorker || 'System'}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div>
-                      <p className="text-xs font-semibold text-slate-500 mb-2">DOMINANT SYMPTOMS</p>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedVillage.dominantSymptoms.length > 0 ? (
-                          selectedVillage.dominantSymptoms.map((sym, i) => (
-                            <span key={i} className="px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded-md border border-slate-200">
-                              {sym}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-sm text-slate-400 italic">None reported</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {selectedVillage.status === HealthStatus.RED && (
-                      <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-                        <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
-                        <div>
-                          <p className="text-sm font-bold text-red-700">Immediate Action Required</p>
-                          <p className="text-xs text-red-600 mt-1">Dispatch emergency medical team. Quarantine protocols suggested.</p>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Public Comments Section */}
-                    <div className="mt-6 pt-4 border-t border-slate-100">
-                      <div className="flex items-center gap-2 mb-3">
-                        <MessageSquare className="w-4 h-4 text-slate-400" />
-                        <h4 className="text-sm font-bold text-slate-700">Public Comments</h4>
-                      </div>
-
-                      <div className="bg-slate-50 rounded-lg p-3 max-h-48 overflow-y-auto space-y-3 mb-3 custom-scrollbar border border-slate-100">
-                        {selectedVillage.comments && selectedVillage.comments.length > 0 ? (
-                          selectedVillage.comments.map((comment) => (
-                            <div key={comment.id} className="bg-white p-2.5 rounded shadow-sm border border-slate-100">
-                              <div className="flex justify-between items-baseline mb-1">
-                                <span className="text-xs font-bold text-slate-700">{comment.author}</span>
-                                <span className="text-[10px] text-slate-400">
-                                  {new Date(comment.timestamp).toLocaleDateString()}
-                                </span>
-                              </div>
-                              <p className="text-xs text-slate-600 leading-relaxed">{comment.text}</p>
-                            </div>
-                          ))
-                        ) : (
-                          <p className="text-xs text-center text-slate-400 py-2 italic">No comments yet. Be the first to share.</p>
-                        )}
-                      </div>
-
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          placeholder="Write a comment..."
-                          className="flex-1 text-xs p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                          value={commentText}
-                          onChange={(e) => setCommentText(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}
-                        />
-                        <button 
-                          onClick={handleAddComment}
-                          disabled={!commentText.trim()}
-                          className="bg-blue-600 text-white p-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                        >
-                          <Send className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-8 text-center text-slate-400">
-                    <MapIcon className="w-12 h-12 mx-auto mb-2 opacity-20" />
-                    <p>Select a village on the map to view details</p>
-                  </div>
-                )}
+              {/* Global Legend/Info */}
+              <div className="bg-indigo-50 rounded-xl p-4 border border-indigo-100">
+                <h4 className="text-sm font-bold text-indigo-900 mb-2">AI Surveillance Active</h4>
+                <p className="text-xs text-indigo-700 leading-relaxed">
+                  The system is continuously analyzing reports. Red zones indicate high probability of outbreaks based on symptoms and sanitation levels.
+                </p>
               </div>
 
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'asha' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+            <div className="order-2 lg:order-1">
+               <AshaForm 
+                  villages={villages} 
+                  onSubmitReport={handleReportSubmit} 
+                  isSubmitting={isAnalyzing} 
+               />
+            </div>
+            
+            <div className="order-1 lg:order-2 space-y-6">
+              <div className="bg-gradient-to-br from-indigo-600 to-blue-700 text-white p-6 rounded-2xl shadow-lg">
+                <h3 className="text-lg font-bold mb-2">Instructions for ASHA Workers</h3>
+                <ul className="space-y-3 text-sm text-indigo-100">
+                  <li className="flex gap-2 items-start"><ArrowRight className="w-4 h-4 mt-0.5 shrink-0"/> Ensure GPS location is accurate when reporting new cases.</li>
+                  <li className="flex gap-2 items-start"><ArrowRight className="w-4 h-4 mt-0.5 shrink-0"/> Report "Worst" sanitation immediately if drainage is blocked.</li>
+                  <li className="flex gap-2 items-start"><ArrowRight className="w-4 h-4 mt-0.5 shrink-0"/> If disease is unknown, list all symptoms clearly for AI diagnosis.</li>
+                </ul>
+              </div>
+
+              {latestAnalysis && (
+                <div className="bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="bg-slate-900 text-white p-4 border-b border-slate-800 flex justify-between items-center">
+                    <h3 className="font-bold flex items-center gap-2">
+                      <Database className="w-4 h-4 text-green-400" />
+                      AI Analysis Result
+                    </h3>
+                    <span className="text-xs text-slate-400">For: {latestAnalysis.villageName}</span>
+                  </div>
+                  
+                  <div className="p-6 space-y-5">
+                    
+                    {/* Risk Meter */}
+                    <div className="flex items-center justify-between bg-slate-50 p-4 rounded-lg border border-slate-100">
+                      <div>
+                        <p className="text-xs text-slate-500 uppercase font-bold tracking-wider">Risk Assessment</p>
+                        <p className={`text-2xl font-bold ${
+                          latestAnalysis.result.riskLevel === HealthStatus.RED ? 'text-red-600' :
+                          latestAnalysis.result.riskLevel === HealthStatus.YELLOW ? 'text-yellow-600' : 'text-green-600'
+                        }`}>{latestAnalysis.result.riskLevel}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-slate-500 uppercase font-bold tracking-wider">Outbreak Probability</p>
+                        <p className="text-2xl font-bold text-slate-800">{latestAnalysis.result.predictedOutbreakChance}%</p>
+                      </div>
+                    </div>
+
+                    {/* AI Diagnosis */}
+                    <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg">
+                       <h4 className="text-sm font-bold text-blue-900 mb-1 flex items-center gap-2">
+                         <Stethoscope className="w-4 h-4" /> AI Diagnosis
+                       </h4>
+                       <p className="text-blue-800 font-medium">{latestAnalysis.result.possibleDiagnosis || "Could not determine"}</p>
+                    </div>
+
+                    {/* Reasoning */}
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-700 mb-2">Analysis Reasoning</h4>
+                      <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-3 rounded border border-slate-100">
+                        {latestAnalysis.result.reasoning}
+                      </p>
+                    </div>
+
+                    {/* Actions */}
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-700 mb-3">Recommended Actions</h4>
+                      <ul className="space-y-2">
+                        {latestAnalysis.result.recommendedActions.map((action, i) => (
+                          <li key={i} className="flex gap-3 text-sm text-slate-700 bg-white border border-slate-200 p-2.5 rounded shadow-sm">
+                            <span className="bg-indigo-100 text-indigo-700 w-5 h-5 flex items-center justify-center rounded-full text-xs font-bold shrink-0">
+                              {i + 1}
+                            </span>
+                            {action}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

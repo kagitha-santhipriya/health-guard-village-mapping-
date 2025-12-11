@@ -41,7 +41,11 @@ const VillageMap: React.FC<VillageMapProps> = ({ villages, onSelectVillage, sele
     }
 
     return () => {
-      // Cleanup if needed
+      // Cleanup map instance on unmount if necessary
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
     };
   }, []);
 
