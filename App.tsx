@@ -4,7 +4,7 @@ import { Village, CaseReport, HealthStatus, AIAnalysisResult, OutbreakCluster, C
 import { analyzeVillageHealth, analyzeClusters } from './services/geminiService';
 import VillageMap from './components/VillageMap';
 import AshaForm from './components/AshaForm';
-import { Activity, Map as MapIcon, ShieldAlert, UserCheck, AlertTriangle, ArrowRight, Search, Database, LandPlot, Stethoscope, MessageSquare, Send, Loader2, ClipboardList, Lightbulb } from 'lucide-react';
+import { Activity, Map as MapIcon, ShieldAlert, UserCheck, AlertTriangle, ArrowRight, Search, Database, LandPlot, Stethoscope, MessageSquare, Send, Loader2, ClipboardList, Lightbulb, X } from 'lucide-react';
 
 // Main App Component
 const App: React.FC = () => {
@@ -33,6 +33,7 @@ const App: React.FC = () => {
 
   // Search States
   const [flyToLocation, setFlyToLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [searchedLocation, setSearchedLocation] = useState<{name: string, lat: number, lng: number} | null>(null);
   const [isGlobalSearching, setIsGlobalSearching] = useState(false);
 
   // Persist villages to LocalStorage whenever they change
@@ -59,6 +60,10 @@ const App: React.FC = () => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
 
+    // Reset selection logic
+    setSelectedVillageId(undefined);
+    setSearchedLocation(null);
+
     // 1. Try finding in local database
     const found = villages.find(v => v.name.toLowerCase().includes(searchQuery.toLowerCase()));
     
@@ -70,24 +75,45 @@ const App: React.FC = () => {
       setIsGlobalSearching(true);
       try {
         const query = `${searchQuery}, India`;
-        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1&addressdetails=1`);
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1&addressdetails=1`, {
+            headers: {
+                'Accept-Language': 'en-US,en;q=0.9',
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Nominatim API Error: ${response.status}`);
+        }
+
         const data = await response.json();
         
-        if (data && data.length > 0) {
+        if (Array.isArray(data) && data.length > 0) {
           const { lat, lon, display_name } = data[0];
-          setFlyToLocation({ lat: parseFloat(lat), lng: parseFloat(lon) });
-          setSelectedVillageId(undefined); // Deselect current as it's not in DB
-          alert(`Found on map: ${display_name.split(',').slice(0, 3).join(',')}`);
+          const newLoc = { lat: parseFloat(lat), lng: parseFloat(lon) };
+          
+          setFlyToLocation(newLoc);
+          setSearchedLocation({
+             name: display_name,
+             lat: newLoc.lat,
+             lng: newLoc.lng
+          });
+          // Remove alert, UI will show details in sidebar
         } else {
-          alert("Village not found in database or on global map.");
+          alert("Location not found in database or on global map.");
         }
       } catch (err) {
         console.error("Global search failed", err);
-        alert("Search failed. Please try again.");
+        alert("Search Service Error. Please check your internet connection.");
       } finally {
         setIsGlobalSearching(false);
       }
     }
+  };
+
+  const clearSearch = () => {
+      setSearchedLocation(null);
+      setFlyToLocation(null);
+      setSearchQuery('');
   };
 
   const handleReportSubmit = async (report: CaseReport, villageName: string) => {
@@ -149,6 +175,8 @@ const App: React.FC = () => {
     setActiveTab('gov');
     setTimeout(() => {
         setSelectedVillageId(updatedVillage.id);
+        setSearchedLocation(null);
+        setFlyToLocation(null);
     }, 100);
   };
 
@@ -245,7 +273,7 @@ const App: React.FC = () => {
                     <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
                     <input 
                       type="text" 
-                      placeholder="Search village name to locate..."
+                      placeholder="Search village name or any location..."
                       className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
@@ -265,7 +293,7 @@ const App: React.FC = () => {
                <div className="flex-grow min-h-[500px] rounded-xl overflow-hidden border border-slate-300 shadow-sm relative">
                   <VillageMap 
                     villages={villages} 
-                    onSelectVillage={setSelectedVillageId as any} 
+                    onSelectVillage={(v) => { setSelectedVillageId(v.id); setSearchedLocation(null); setFlyToLocation(null); }} 
                     selectedVillageId={selectedVillageId}
                     clusters={clusters}
                     flyToLocation={flyToLocation}
@@ -299,8 +327,9 @@ const App: React.FC = () => {
                 </div>
               )}
 
-              {/* Village Details Section */}
+              {/* DETAILS PANEL LOGIC */}
               {selectedVillage ? (
+                // --- CASE 1: Village Selected ---
                 <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 animate-in slide-in-from-right duration-300">
                   {/* Village Header */}
                   <div className="flex justify-between items-start">
@@ -414,7 +443,43 @@ const App: React.FC = () => {
                   </div>
 
                 </div>
+              ) : searchedLocation ? (
+                 // --- CASE 2: Arbitrary Location Found ---
+                 <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 animate-in slide-in-from-right duration-300">
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <h2 className="text-xl font-bold text-slate-800">Location Found</h2>
+                            <p className="text-slate-500 text-sm flex items-center gap-1">
+                                <MapIcon className="w-3 h-3" /> Custom Map Search
+                            </p>
+                        </div>
+                        <button onClick={clearSearch} className="p-1 hover:bg-slate-100 rounded-full transition-colors">
+                           <X className="w-5 h-5 text-slate-400" />
+                        </button>
+                    </div>
+                    
+                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                        <p className="font-medium text-slate-800 text-sm leading-relaxed">{searchedLocation.name}</p>
+                        <div className="mt-3 flex gap-4 text-xs text-slate-500 font-mono border-t border-slate-200 pt-2">
+                            <span>Lat: {searchedLocation.lat.toFixed(5)}</span>
+                            <span>Lng: {searchedLocation.lng.toFixed(5)}</span>
+                        </div>
+                    </div>
+
+                    <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                        <h4 className="text-sm font-bold text-blue-900 mb-2 flex items-center gap-2">
+                           <Lightbulb className="w-4 h-4" /> Monitoring Status
+                        </h4>
+                        <p className="text-xs text-blue-800 leading-relaxed mb-2">
+                            This location is not currently in the active monitoring database. No ASHA reports or AI predictions are available for this specific coordinate yet.
+                        </p>
+                        <p className="text-xs text-blue-800 leading-relaxed">
+                            <strong>To Activate:</strong> An ASHA worker must submit a field report from this location to generate health analytics and outbreak predictions.
+                        </p>
+                    </div>
+                 </div>
               ) : (
+                // --- CASE 3: Empty State ---
                 <div className="bg-white border border-slate-200 rounded-xl p-8 shadow-sm flex flex-col items-center justify-center text-center h-64 text-slate-400">
                    <LandPlot className="w-12 h-12 mb-2 opacity-20" />
                    <p>Select a village on the map or use search to view details</p>

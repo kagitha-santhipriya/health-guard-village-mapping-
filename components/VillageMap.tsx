@@ -73,7 +73,16 @@ const VillageMap: React.FC<VillageMapProps> = ({ villages, onSelectVillage, sele
 
   // Handle manual search fly to (fly to arbitrary location)
   useEffect(() => {
-    if (!flyToLocation || !mapInstanceRef.current) return;
+    if (!mapInstanceRef.current) return;
+    
+    // Logic to remove marker if flyToLocation is null
+    if (!flyToLocation) {
+        if (tempMarkerRef.current) {
+            tempMarkerRef.current.remove();
+            tempMarkerRef.current = null;
+        }
+        return;
+    }
 
     const L = (window as any).L;
     

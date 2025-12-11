@@ -39,13 +39,17 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
           
           // Optional: Reverse Geocode to check where they are
           try {
-             const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
-             const data = await res.json();
-             if (data && data.display_name) {
-               setFoundAddress(data.display_name);
+             const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
+                headers: { 'Accept-Language': 'en-US,en;q=0.9' }
+             });
+             if (res.ok) {
+                const data = await res.json();
+                if (data && data.display_name) {
+                  setFoundAddress(data.display_name);
+                }
              }
           } catch(e) {
-             console.log("Reverse geocode failed", e);
+             console.warn("Reverse geocode failed (non-critical)", e);
           }
 
         },
@@ -71,10 +75,20 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
       // Search for the village in India to avoid ambiguity
       // We append India to ensure we don't find US cities etc.
       const query = `${selectedVillageName}, India`;
-      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
+      
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`, {
+          headers: {
+              'Accept-Language': 'en-US,en;q=0.9',
+          }
+      });
+      
+      if (!response.ok) {
+          throw new Error(`Nominatim API Error: ${response.status}`);
+      }
+
       const data = await response.json();
       
-      if (data && data.length > 0) {
+      if (Array.isArray(data) && data.length > 0) {
         const { lat, lon, display_name } = data[0];
         setWorkerLocation(`${parseFloat(lat).toFixed(5)}, ${parseFloat(lon).toFixed(5)}`);
         setFoundAddress(display_name);
@@ -83,7 +97,7 @@ const AshaForm: React.FC<AshaFormProps> = ({ villages, onSubmitReport, isSubmitt
       }
     } catch (e) {
       console.error("Geocoding failed", e);
-      alert("Could not find location coordinates.");
+      alert("Service unavailable (Network Error). Please enter coordinates manually.");
     } finally {
       setIsGeocoding(false);
     }
